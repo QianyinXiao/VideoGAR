@@ -1,4 +1,3 @@
-__author__ = "Jie Lei"
 
 #  ref: https://github.com/lichengunc/MAttNet/blob/master/lib/layers/lang_encoder.py#L11
 #  ref: https://github.com/easonnie/flint/blob/master/torch_util.py#L272

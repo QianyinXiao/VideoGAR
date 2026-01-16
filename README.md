@@ -27,16 +27,17 @@ VideoGAR/
 ## Key Components
 
 ### VideoGARModel
+
 The main model class that implements:
+
 - BiMamba encoder for efficient sequence modeling
 - Fusion encoder for query-video interaction
 - Query decoder for generative augmentation
-- TFVTG scoring for improved temporal localization
 
 ### Core Features
+
 - **BiMamba Backbone**: Efficient bidirectional Mamba encoder
 - **Generative Augmentation**: Query reconstruction with fusion encoder
-- **TFVTG Scoring**: Token-level fusion for video temporal grounding
 
 ## Requirements
 
