@@ -10,7 +10,6 @@ VideoGAR/
 │   ├── model.py           # Main VideoGARModel
 │   ├── bimamba.py         # BiMamba encoder layer
 │   ├── query_decoder.py   # Query decoder for generative augmentation
-│   ├── tfvtg_scoring.py   # TFVTG scoring module
 │   ├── config.py          # Configuration
 │   ├── train.py           # Training script
 │   ├── inference.py       # Inference script
@@ -38,6 +37,7 @@ The main model class that implements:
 
 - **BiMamba Backbone**: Efficient bidirectional Mamba encoder
 - **Generative Augmentation**: Query reconstruction with fusion encoder
+- **Boundary-Aware Momemt Localization**: Boundary-aware localization for precise moments
 
 ## Requirements
 
