@@ -21,16 +21,12 @@ class FusionEncoderLayer(nn.Module):
     def _build_cross_mask(query_mask, key_mask):
         return torch.einsum("bm,bn->bmn", query_mask, key_mask)
 
-    def forward(self, query_states, video_states, query_mask, video_mask, return_attention=False):
+    def forward(self, query_states, video_states, query_mask, video_mask):
         q2v_mask = self._build_cross_mask(query_mask, video_mask)
         v2q_mask = self._build_cross_mask(video_mask, query_mask)
-        if return_attention:
-            query_states, q2v_attn = self.query_to_video(query_states, video_states, q2v_mask, return_attention=True)
-        else:
-            query_states = self.query_to_video(query_states, video_states, q2v_mask)
-            q2v_attn = None
+        query_states = self.query_to_video(query_states, video_states, q2v_mask)
         video_states = self.video_to_query(video_states, query_states, v2q_mask)
-        return query_states, video_states, q2v_attn
+        return query_states, video_states
 
 
 class VideoGARModel(nn.Module):
@@ -221,9 +217,7 @@ class VideoGARModel(nn.Module):
         if self.use_generative_augmentation and query_input_ids is not None and query_attn_mask is not None:
             fused_video_feat = x_video_feat
             if self.use_fusion_encoder:
-                fused_video_feat, _ = self.fuse_query_video(
-                    encoded_query, query_mask, x_video_feat, video_mask, return_attention=False
-                )
+                fused_video_feat = self.fuse_query_video(encoded_query, query_mask, x_video_feat, video_mask)
             loss_lm = self.compute_lm_loss(query_input_ids, query_attn_mask, fused_video_feat, video_mask)
         # sum loss
         loss = loss_fcl + loss_vcl + loss_st_ed + loss_neg_ctx + loss_neg_q + self.lm_weight * loss_lm
@@ -392,7 +386,7 @@ class VideoGARModel(nn.Module):
         return st_prob, ed_prob
 
     def get_pred_from_raw_query(self, query_feat, query_mask, video_feat, video_mask, sub_feat, sub_mask, cross=False,
-                                return_query_feats=False, return_encoded_query=False, return_similarity=False):
+                                return_query_feats=False, return_encoded_query=False):
         """
         Args:
             query_feat: (N, Lq, Dq)
@@ -404,8 +398,6 @@ class VideoGARModel(nn.Module):
             cross:
             return_query_feats:
         """
-        if return_similarity:
-            return_encoded_query = True
         if return_encoded_query:
             video_query, sub_query, encoded_query = self.encode_query(query_feat, query_mask,
                                                                       return_encoded_query=True)
@@ -427,9 +419,6 @@ class VideoGARModel(nn.Module):
         outputs.extend([q2ctx_scores, st_prob, ed_prob])
         if return_encoded_query:
             outputs.append(encoded_query)
-        if return_similarity:
-            temporal_curve = self.get_temporal_curve(encoded_query, query_mask, video_feat, video_mask)
-            outputs.append(temporal_curve)
         return tuple(outputs)
 
     def compute_lm_loss(self, input_ids, attention_mask, memory, memory_mask):
@@ -443,44 +432,14 @@ class VideoGARModel(nn.Module):
                                ignore_index=self.lm_pad_token_id)
         return loss
 
-    @staticmethod
-    def compute_temporal_curve_from_tokens(encoded_query, query_mask, context_feat, context_mask):
-        token_sim = torch.einsum("bld,bmd->blm", encoded_query, context_feat)
-        token_sim = token_sim * query_mask.unsqueeze(-1)
-        denom = query_mask.sum(dim=1, keepdim=True).clamp(min=1.0)
-        temporal_curve = token_sim.sum(dim=1) / denom
-        return temporal_curve * context_mask
-
-    @staticmethod
-    def _attention_to_curve(attention_probs, query_mask):
-        attn = attention_probs.mean(dim=1)
-        token_mask = query_mask.unsqueeze(-1)
-        denom = token_mask.sum(dim=1).clamp(min=1.0)
-        return (attn * token_mask).sum(dim=1) / denom
-
-    def fuse_query_video(self, encoded_query, query_mask, video_feat, video_mask, return_attention=False):
+    def fuse_query_video(self, encoded_query, query_mask, video_feat, video_mask):
         if not self.use_fusion_encoder:
-            return video_feat, None
+            return video_feat
         q = encoded_query
         v = video_feat
-        curves = []
         for layer in self.fusion_layers:
-            q, v, q2v_attn = layer(q, v, query_mask, video_mask, return_attention=return_attention)
-            if return_attention:
-                curves.append(self._attention_to_curve(q2v_attn, query_mask))
-        if return_attention:
-            temporal_curve = torch.stack(curves, dim=0).mean(dim=0)
-            temporal_curve = temporal_curve * video_mask
-            return v, temporal_curve
-        return v, None
-
-    def get_temporal_curve(self, encoded_query, query_mask, video_feat, video_mask):
-        if self.use_fusion_encoder:
-            _, temporal_curve = self.fuse_query_video(
-                encoded_query, query_mask, video_feat, video_mask, return_attention=True
-            )
-            return temporal_curve
-        return self.compute_temporal_curve_from_tokens(encoded_query, query_mask, video_feat, video_mask)
+            q, v = layer(q, v, query_mask, video_mask)
+        return v
 
     def get_video_level_loss(self, query_context_scores):
         """ ranking loss between (pos. query + pos. video) and (pos. query + neg. video) or (neg. query + pos. video)

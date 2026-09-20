@@ -12,7 +12,6 @@ from torch.utils.data import DataLoader
 from method_core.config import TestOptions
 from method_core.model import VideoGARModel
 from method_core.start_end_dataset import start_end_collate, StartEndEvalDataset, prepare_batch_inputs
-from method_core.tfvtg_scoring import compute_tfvtg_st_ed_probs
 from utils.basic_utils import save_json, load_json
 from utils.temporal_nms import temporal_non_maximum_suppression
 from utils.tensor_utils import find_max_triples_from_upper_triangle_product
@@ -107,34 +106,6 @@ def get_submission_top_n(submission, top_n=100):
     return top_n_submission
 
 
-def compute_tfvtg_pair_probs(model, encoded_query, query_mask, video_feat, video_mask, pair_video_indices, opt):
-    bsz_q, top_k = pair_video_indices.shape
-    seq_l = video_feat.size(1)
-    st_probs = torch.zeros((bsz_q, top_k, seq_l), device=video_feat.device)
-    ed_probs = torch.zeros_like(st_probs)
-    chunk_size = max(1, getattr(opt, "tfvtg_pair_chunk", 128))
-    for qi in range(bsz_q):
-        q = encoded_query[qi]
-        q_mask = query_mask[qi]
-        vid_indices = pair_video_indices[qi]
-        for start in range(0, top_k, chunk_size):
-            end = min(start + chunk_size, top_k)
-            v_idx = vid_indices[start:end]
-            q_chunk = q.unsqueeze(0).expand(end - start, -1, -1)
-            q_mask_chunk = q_mask.unsqueeze(0).expand(end - start, -1)
-            v_chunk = index_if_not_none(video_feat, v_idx)
-            v_mask_chunk = index_if_not_none(video_mask, v_idx)
-            curve = model.get_temporal_curve(q_chunk, q_mask_chunk, v_chunk, v_mask_chunk)
-            st_chunk, ed_chunk = compute_tfvtg_st_ed_probs(
-                curve, v_mask_chunk,
-                stride=opt.tfvtg_stride, max_stride=opt.tfvtg_max_stride,
-                dynamic_weight=opt.tfvtg_dynamic_weight, static_weight=opt.tfvtg_static_weight,
-                smooth_win=opt.tfvtg_smooth_win)
-            st_probs[qi, start:end, :st_chunk.size(1)] = st_chunk
-            ed_probs[qi, start:end, :ed_chunk.size(1)] = ed_chunk
-    return st_probs, ed_probs
-
-
 def compute_context_info(model, eval_dataset, opt):
     """Use val set to do evaluation, remember to run with torch.no_grad().
     estimated 2200 (videos) * 100 (frm) * 500 (hsz) * 4 (B) * 2 (video/sub) * 2 (layers) / (1024 ** 2) = 1.76 GB
@@ -222,32 +193,19 @@ def compute_query2ctx_info_svmr_only(model, eval_dataset, opt, ctx_info, max_bef
         # query_context_scores (_N_q, N_videos), st_prob, ed_prob (_N_q, L)
         query2video_meta_indices = torch.tensor([svmr_video2meta_idx[e["vid_name"]] for e in _query_metas],
                                                 dtype=torch.long, requires_grad=False)
-        outputs = model.get_pred_from_raw_query(
+        _query_context_scores, _st_probs, _ed_probs = model.get_pred_from_raw_query(
             model_inputs["query_feat"], model_inputs["query_mask"],
             index_if_not_none(ctx_info["video_feat"], query2video_meta_indices),
             index_if_not_none(ctx_info["video_mask"], query2video_meta_indices),
             index_if_not_none(ctx_info["sub_feat"], query2video_meta_indices),
             index_if_not_none(ctx_info["sub_mask"], query2video_meta_indices),
-            cross=False, return_encoded_query=opt.scoring_method == "TFVTG")
-        if opt.scoring_method == "TFVTG":
-            _query_context_scores, _st_probs, _ed_probs, encoded_query = outputs
-            gt_video_feat = index_if_not_none(ctx_info["video_feat"], query2video_meta_indices)
-            gt_video_mask = index_if_not_none(ctx_info["video_mask"], query2video_meta_indices)
-            _st_probs, _ed_probs = compute_tfvtg_st_ed_probs(
-                model.get_temporal_curve(encoded_query, model_inputs["query_mask"], gt_video_feat, gt_video_mask),
-                gt_video_mask,
-                stride=opt.tfvtg_stride, max_stride=opt.tfvtg_max_stride,
-                dynamic_weight=opt.tfvtg_dynamic_weight, static_weight=opt.tfvtg_static_weight,
-                smooth_win=opt.tfvtg_smooth_win)
-        else:
-            _query_context_scores, _st_probs, _ed_probs = outputs
+            cross=False)
         _query_context_scores = _query_context_scores + 1  # move cosine similarity to [0, 2]
 
         # normalize to get true probabilities!!!
         # the probabilities here are already (pad) masked, so only need to do softmax
-        if opt.scoring_method != "TFVTG":
-            _st_probs = F.softmax(_st_probs, dim=-1)  # (_N_q, L)
-            _ed_probs = F.softmax(_ed_probs, dim=-1)
+        _st_probs = F.softmax(_st_probs, dim=-1)  # (_N_q, L)
+        _ed_probs = F.softmax(_ed_probs, dim=-1)
 
         svmr_gt_st_probs[idx * bsz:(idx + 1) * bsz, :_st_probs.shape[1]] = _st_probs.cpu().numpy()
         svmr_gt_ed_probs[idx * bsz:(idx + 1) * bsz, :_ed_probs.shape[1]] = _ed_probs.cpu().numpy()
@@ -371,43 +329,25 @@ def compute_query2ctx_info(model, eval_dataset, opt, ctx_info, max_before_nms=10
         query_metas.extend(batch[0])
         model_inputs = prepare_batch_inputs(batch[1], device=opt.device, non_blocking=opt.pin_memory)
         # query_context_scores (_N_q, N_videos), st_prob, ed_prob (_N_q, N_videos, L)
-        outputs = model.get_pred_from_raw_query(
+        _query_context_scores, _st_probs, _ed_probs = model.get_pred_from_raw_query(
             model_inputs["query_feat"], model_inputs["query_mask"], ctx_info["video_feat"], ctx_info["video_mask"],
-            ctx_info["sub_feat"], ctx_info["sub_mask"], cross=True,
-            return_encoded_query=opt.scoring_method == "TFVTG")
-        if opt.scoring_method == "TFVTG":
-            _query_context_scores, _st_probs, _ed_probs, encoded_query = outputs
-        else:
-            _query_context_scores, _st_probs, _ed_probs = outputs
+            ctx_info["sub_feat"], ctx_info["sub_mask"], cross=True)
         # _query_context_scores = _query_context_scores + 1  # move cosine similarity to [0, 2]
         # To give more importance to top scores, the higher opt.alpha is the more importance will be given
         _query_context_scores = torch.exp(opt.q2c_alpha * _query_context_scores)
         # normalize to get true probabilities!!!
         # the probabilities here are already (pad) masked, so only need to do softmax
-        if opt.scoring_method != "TFVTG":
-            _st_probs = F.softmax(_st_probs, dim=-1)  # (_N_q, N_videos, L)
-            _ed_probs = F.softmax(_ed_probs, dim=-1)
+        _st_probs = F.softmax(_st_probs, dim=-1)  # (_N_q, N_videos, L)
+        _ed_probs = F.softmax(_ed_probs, dim=-1)
 
         if is_svmr:  # collect SVMR data
             row_indices = torch.arange(0, len(_st_probs))
             query2video_meta_indices = torch.tensor([svmr_video2meta_idx[e["vid_name"]] for e in _query_metas],
                                                     dtype=torch.long)
-            if opt.scoring_method == "TFVTG":
-                gt_video_feat = index_if_not_none(ctx_info["video_feat"], query2video_meta_indices)
-                gt_video_mask = index_if_not_none(ctx_info["video_mask"], query2video_meta_indices)
-                gt_st, gt_ed = compute_tfvtg_st_ed_probs(
-                    model.get_temporal_curve(encoded_query, model_inputs["query_mask"], gt_video_feat, gt_video_mask),
-                    gt_video_mask,
-                    stride=opt.tfvtg_stride, max_stride=opt.tfvtg_max_stride,
-                    dynamic_weight=opt.tfvtg_dynamic_weight, static_weight=opt.tfvtg_static_weight,
-                    smooth_win=opt.tfvtg_smooth_win)
-                svmr_gt_st_probs[idx * bsz:(idx + 1) * bsz, :gt_st.shape[1]] = gt_st.cpu().numpy()
-                svmr_gt_ed_probs[idx * bsz:(idx + 1) * bsz, :gt_ed.shape[1]] = gt_ed.cpu().numpy()
-            else:
-                svmr_gt_st_probs[idx * bsz:(idx + 1) * bsz, :_st_probs.shape[2]] = \
-                    _st_probs[row_indices, query2video_meta_indices].cpu().numpy()
-                svmr_gt_ed_probs[idx * bsz:(idx + 1) * bsz, :_ed_probs.shape[2]] = \
-                    _ed_probs[row_indices, query2video_meta_indices].cpu().numpy()
+            svmr_gt_st_probs[idx * bsz:(idx + 1) * bsz, :_st_probs.shape[2]] = \
+                _st_probs[row_indices, query2video_meta_indices].cpu().numpy()
+            svmr_gt_ed_probs[idx * bsz:(idx + 1) * bsz, :_ed_probs.shape[2]] = \
+                _ed_probs[row_indices, query2video_meta_indices].cpu().numpy()
 
         if not (is_vr or is_vcmr):
             continue
@@ -432,13 +372,8 @@ def compute_query2ctx_info(model, eval_dataset, opt, ctx_info, max_before_nms=10
         # Get VCMR results
         # compute combined scores
         row_indices = torch.arange(0, len(_st_probs), device=opt.device).unsqueeze(1)
-        if opt.scoring_method == "TFVTG":
-            _st_probs, _ed_probs = compute_tfvtg_pair_probs(
-                model, encoded_query, model_inputs["query_mask"], ctx_info["video_feat"], ctx_info["video_mask"],
-                _sorted_q2c_indices, opt)
-        else:
-            _st_probs = _st_probs[row_indices, _sorted_q2c_indices]  # (_N_q, max_n_videos, L)
-            _ed_probs = _ed_probs[row_indices, _sorted_q2c_indices]
+        _st_probs = _st_probs[row_indices, _sorted_q2c_indices]  # (_N_q, max_n_videos, L)
+        _ed_probs = _ed_probs[row_indices, _sorted_q2c_indices]
         # (_N_q, max_n_videos, L, L)
         score_theta = getattr(opt, "score_theta", None)
         if score_theta is None:
@@ -590,7 +525,7 @@ def setup_model(opt):
         logger.info("CUDA enabled.")
         model.to(opt.device)
         if len(opt.device_ids) > 1:
-            logger.info("Use multi GPU", opt.device_ids)
+            logger.info("Use multi GPU %s", opt.device_ids)
             model = torch.nn.DataParallel(model, device_ids=opt.device_ids)  # use multi GPU
     return model
 
@@ -600,8 +535,6 @@ def start_inference():
     opt = TestOptions().parse()
     cudnn.benchmark = False
     cudnn.deterministic = True
-    if opt.scoring_method == "TFVTG" and not getattr(opt, "use_fusion_encoder", False):
-        raise ValueError("TFVTG scoring requires --use_fusion_encoder in the trained model config.")
 
     assert opt.eval_path is not None
     eval_dataset = StartEndEvalDataset(

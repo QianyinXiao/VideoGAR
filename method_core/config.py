@@ -115,7 +115,7 @@ class BaseOptions(object):
         self.parser.add_argument("--use_generative_augmentation", action="store_true",
                                  help="Enable decoder LM loss during training")
         self.parser.add_argument("--use_fusion_encoder", action="store_true",
-                                 help="Enable query-video fusion encoder (GAR/TFVTG)")
+                                 help="Enable query-video fusion encoder for generative augmentation")
         self.parser.add_argument("--fusion_num_layers", type=int, default=2,
                                  help="number of fusion encoder layers")
         self.parser.add_argument("--lm_weight", type=float, default=0.3, help="weight for LM loss")
@@ -155,23 +155,6 @@ class BaseOptions(object):
                                  help="additionally use non-maximum suppression (or non-minimum suppression for "
                                       "distance) to post-processing the predictions. -1: do not use nms. 0.6 for "
                                       "charades_sta, 0.5 for anet_cap")
-        # TFVTG scoring parameters
-        self.parser.add_argument("--scoring_method", type=str, default="Baseline",
-                                 choices=["Baseline", "TFVTG"],
-                                 help="Scoring method for moment retrieval. Baseline: use model output directly; "
-                                      "TFVTG: use temporal fine-grained video-text grounding scoring")
-        self.parser.add_argument("--tfvtg_stride", type=int, default=2,
-                                 help="stride for TFVTG scoring")
-        self.parser.add_argument("--tfvtg_max_stride", type=int, default=16,
-                                 help="max stride for TFVTG scoring")
-        self.parser.add_argument("--tfvtg_dynamic_weight", type=float, default=0.5,
-                                 help="weight for dynamic scoring in TFVTG")
-        self.parser.add_argument("--tfvtg_static_weight", type=float, default=0.5,
-                                 help="weight for static scoring in TFVTG")
-        self.parser.add_argument("--tfvtg_smooth_win", type=int, default=3,
-                                 help="smooth window size for TFVTG scoring")
-        self.parser.add_argument("--tfvtg_pair_chunk", type=int, default=128,
-                                 help="pair chunk size for TFVTG scoring in VCMR")
 
     def display_save(self, opt):
         args = vars(opt)
@@ -197,12 +180,10 @@ class BaseOptions(object):
             opt.model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results", opt.model_dir)
             saved_options = load_json(os.path.join(opt.model_dir, self.saved_option_filename))
             for arg in saved_options:  # use saved options to overwrite all BaseOptions args.
-                if arg not in ["results_root", "num_workers", "nms_thd", "debug",
-                               "eval_split_name", "eval_path", "eval_query_bsz", "eval_context_bsz",
-                               "max_pred_l", "min_pred_l", "external_inference_vr_res_path",
-                               "scoring_method", "score_theta", "tfvtg_stride", "tfvtg_max_stride",
-                               "tfvtg_dynamic_weight",
-                               "tfvtg_static_weight", "tfvtg_smooth_win", "tfvtg_pair_chunk"]:
+                if hasattr(opt, arg) and arg not in ["results_root", "num_workers", "nms_thd", "debug",
+                                                    "eval_split_name", "eval_path", "eval_query_bsz",
+                                                    "eval_context_bsz", "max_pred_l", "min_pred_l",
+                                                    "external_inference_vr_res_path", "score_theta"]:
                     setattr(opt, arg, saved_options[arg])
         else:
             if opt.exp_id is None:
@@ -268,4 +249,3 @@ class TestOptions(BaseOptions):
                                       "VCMR: Video Corpus Moment Retrieval;"
                                       "SVMR: Single Video Moment Retrieval;"
                                       "VR: regular Video Retrieval. (will be performed automatically with VCMR)")
-        # Note: scoring_method and tfvtg_* parameters are now inherited from BaseOptions

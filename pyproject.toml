@@ -1,0 +1,40 @@
+[project]
+name = "videogar"
+version = "0.1.0"
+description = "Environment definition for Generation-Augmented Video Corpus Moment Retrieval"
+requires-python = ">=3.9,<3.12"
+dependencies = [
+    "easydict>=1.13,<2",
+    "h5py>=3.10,<4",
+    "numpy>=1.24,<2",
+    "tensorboard>=2.15,<3",
+    "tokenizers>=0.15.2,<0.20",
+    "tqdm>=4.66,<5",
+    "transformers>=4.38.2,<5",
+]
+
+[project.optional-dependencies]
+gpu-cu118 = [
+    "torch==2.4.0",
+    "torchvision==0.19.0",
+]
+bimamba = [
+    "mamba-ssm==2.3.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+mamba-ssm = [
+    { url = "https://github.com/state-spaces/mamba/releases/download/v2.3.0/mamba_ssm-2.3.0%2Bcu11torch2.4cxx11abiFALSE-cp39-cp39-linux_x86_64.whl", marker = "python_version == '3.9' and sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { url = "https://github.com/state-spaces/mamba/releases/download/v2.3.0/mamba_ssm-2.3.0%2Bcu11torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl", marker = "python_version == '3.10' and sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { url = "https://github.com/state-spaces/mamba/releases/download/v2.3.0/mamba_ssm-2.3.0%2Bcu11torch2.4cxx11abiFALSE-cp311-cp311-linux_x86_64.whl", marker = "python_version == '3.11' and sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+torch = [{ index = "pytorch-cu118" }]
+torchvision = [{ index = "pytorch-cu118" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true

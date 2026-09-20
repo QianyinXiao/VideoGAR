@@ -1,0 +1,54 @@
+cff-version: 1.2.0
+message: "If you use Video-GAR, please cite the paper below."
+title: "Video-GAR: Generation-Augmented Video Corpus Moment Retrieval"
+type: software
+authors:
+  - family-names: Kuai
+    given-names: Mingjin
+  - family-names: Xiao
+    given-names: Qianyin
+    orcid: "https://orcid.org/0009-0007-8189-8279"
+  - family-names: Li
+    given-names: Juncheng
+    orcid: "https://orcid.org/0000-0003-2258-1291"
+  - family-names: Peng
+    given-names: Jin
+    orcid: "https://orcid.org/0009-0008-2401-1931"
+  - family-names: Liao
+    given-names: Lizi
+    orcid: "https://orcid.org/0000-0002-9973-3305"
+  - family-names: Ji
+    given-names: Wei
+    orcid: "https://orcid.org/0000-0002-8106-9768"
+repository-code: "https://github.com/QianyinXiao/VideoGAR"
+license: MIT
+preferred-citation:
+  type: conference-paper
+  authors:
+    - family-names: Kuai
+      given-names: Mingjin
+    - family-names: Xiao
+      given-names: Qianyin
+      orcid: "https://orcid.org/0009-0007-8189-8279"
+    - family-names: Li
+      given-names: Juncheng
+      orcid: "https://orcid.org/0000-0003-2258-1291"
+    - family-names: Peng
+      given-names: Jin
+      orcid: "https://orcid.org/0009-0008-2401-1931"
+    - family-names: Liao
+      given-names: Lizi
+      orcid: "https://orcid.org/0000-0002-9973-3305"
+    - family-names: Ji
+      given-names: Wei
+      orcid: "https://orcid.org/0000-0002-8106-9768"
+  title: "Generation-Augmented Video Corpus Moment Retrieval"
+  collection-title: "Proceedings of the 49th International ACM SIGIR Conference on Research and Development in Information Retrieval"
+  publisher:
+    name: ACM
+  year: 2026
+  month: 7
+  start: 857
+  end: 868
+  doi: "10.1145/3805712.3809742"
+  url: "https://doi.org/10.1145/3805712.3809742"
